@@ -66,7 +66,7 @@ class CustomDialog(QtWidgets.QDialog):
         return self.result #self.name_input.text(
         
     def push_cancel(self):
-        self.result=0
+        self.result=5#0
         self.close()#done(QDialog.Rejected)
 
     def push_ok(self):
@@ -220,6 +220,8 @@ class MainWindow(QtWidgets.QMainWindow): # класс окна от базово
 
             self.BCalc.setEnabled(True)
             self.BClear.setEnabled(True)
+        if (dlg.get_result() == 5):
+            self.BClear.setEnabled(False)
 
 
     def get_file(self): # функция класса MainWindow, вызываемая при нажатии на кнопку BFile
@@ -243,7 +245,7 @@ class MainWindow(QtWidgets.QMainWindow): # класс окна от базово
         except ValueError:
             print("Недопустимое значение. Невозможно считать данные из файла!")
         except IndexError:
-            print("Огшибка IndexError")
+            print("Ошибка IndexError")
         except ZeroDivisionError:
             print("Деление на ноль")
         except FileNotFoundError:
