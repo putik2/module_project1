@@ -33,7 +33,7 @@ class CustomDialog(QtWidgets.QDialog):
         self.label_win = QLabel("Enter win value:")
         layout.addWidget(self.label_win)
         self.win_input = QLineEdit()
-        self.win_input.setText(str(self.win));
+        self.win_input.setText(str(self.win))
         self.win_input.setInputMask("00")
         layout.addWidget(self.win_input)
 
@@ -86,9 +86,9 @@ class CustomDialog(QtWidgets.QDialog):
         if(self.result==2):
             QMessageBox.about(self, "Внимание", "Введены некорректные параметры (poly < win)")
             self.result=0
-            event.ignore();
+            event.ignore()
         else:
-            event.accept();
+            event.accept()
 
     def get_poly(self):
         return self.poly
@@ -110,6 +110,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.BFile = QPushButton('Файл')
         self.BCalc = QPushButton('Рассчитать')
         self.BClear = QPushButton('Очистить')
+        self.BClear.setGeometry(0,0,300,40)
         self.listResult = QListWidget()
         self.listResult.setGeometry(0,0,500,200)
         self.setCentralWidget(self.centralwidget)
@@ -122,7 +123,7 @@ class MainWindow(QtWidgets.QMainWindow):
         grid = QtWidgets.QGridLayout(self.centralwidget)
         grid.addWidget(self.BFile, 0, 0)
         grid.addWidget(self.BCalc, 1, 0) 
-        grid.addWidget(self.BClear, 2, 0) 
+        grid.addWidget(self.BClear,2, 0) 
         
         wg = QWidget()
         grid.addWidget(wg, 3, 0)
