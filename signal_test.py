@@ -1,5 +1,7 @@
+# -*- coding: utf-8 -*-
 
 import sys  
+import time
 import os
 from PyQt5 import QtWidgets, uic
 import pyqtgraph as pg
@@ -7,251 +9,397 @@ import numpy as np
 
 from PyQt5.QtCore    import * 
 from PyQt5.QtGui     import * 
-from PyQt5.QtWidgets import QFileDialog, QApplication, QMainWindow, QWidget, QPushButton, QListWidget, QSplitter, QVBoxLayout, QLabel, QLineEdit, QMessageBox
+from PyQt5.QtWidgets import QFileDialog, QApplication, QMainWindow, QWidget, QPushButton, QListWidget, QSplitter, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QToolBox
 
-from scipy.signal import savgol_filter
+from scipy.signal import savgol_filter, find_peaks
 import scipy.signal as signal_s
+
 from shapely.geometry import LineString
 
+# глобальные переменные
+signal_y = [] # массив данных сигнала из файла
+signal_x = [] # сгенерированный массив данных временных отсчетов сигнала из файла
+savgol_y = [] # массив данных сглаженного сигнала
 
-y2 = []
-y = []
-x = []
+DLG_CLOSE_CANCEL = 0 # Диалог закрыт не по кнопке Отмена
+DLG_CLOSE_OK = 1 # Диалог закрыт не по кнопке OK
+DLG_CLOSE_IGNORE = 2 # Признак отмены закрытия окна
 
-class CustomDialog(QtWidgets.QDialog):
+'''
+Класс:
+Диалог формирования параметров функции сглаживания исходного сигнала
+'''
+class SavGol_Dialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.poly = 3
-        self.win = 11
-        self.result = 0
+        # параметры фильтра сглаживающей функции по умолчанию
+        self.poly = 10 # параметр полинома
+        self.win = 11 # параметр размера окна фильтра (Условие: poly < win) (11;10 - максимально приближено)
+        
+        # результат закрытия диалога
+        self.result = DLG_CLOSE_CANCEL
 
-        self.setWindowTitle("Параметры вычисления сигнала")
+        self.setWindowTitle("Параметры функции сглаживания")
 
-        layout = QVBoxLayout()
+        layout = QVBoxLayout() # менеджер размещения элеменов диалога
 
-        self.label_win = QLabel("Enter win value:")
+        self.label_win = QLabel("Введите параметра окна:")
         layout.addWidget(self.label_win)
-        self.win_input = QLineEdit()
+        self.win_input = QLineEdit() # параметр окна функции сглаживания
         self.win_input.setText(str(self.win))
         self.win_input.setInputMask("00")
         layout.addWidget(self.win_input)
 
-        self.label_poly = QLabel("Enter poly value:")
+        self.label_poly = QLabel("Введите параметр полинома:")
         layout.addWidget(self.label_poly)
-        self.poly_input = QLineEdit()
+        self.poly_input = QLineEdit() # параметр полинома функции сглаживания
         self.poly_input.setText(str(self.poly))
         self.poly_input.setInputMask("00")
         layout.addWidget(self.poly_input)
 
         self.ok_button = QPushButton("OK")
-        self.ok_button.clicked.connect(self.push_ok)
+        self.ok_button.clicked.connect(self.push_ok) # установка функции обработки при нажатии на кнопку OK
         layout.addWidget(self.ok_button)
 
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self.push_cancel)
+        self.cancel_button = QPushButton("Отмена")
+        self.cancel_button.clicked.connect(self.push_cancel) # установка функции обработки при нажатии на кнопку Отмена
         layout.addWidget(self.cancel_button)
 
         self.setLayout(layout)
 
+    '''
+    функция: 
+    Возвращает параметр окна функции сглаживания
+    '''
     def get_win(self):
         return self.win
 
+    '''
+    функция: 
+    Возвращает параметр полинома функции сглаживания
+    '''
     def get_poly(self):
         return self.poly
-        
+
+    '''
+    функция: 
+    Возвращает результат закрытия диалога
+    '''    
     def get_result(self):
         return self.result
-        
+    
+    '''
+    функция: 
+    Обработчик нажатия на кнопку Отмена
+    '''
     def push_cancel(self):
-        self.result=0
-        self.close()
+        self.result = DLG_CLOSE_CANCEL
+        self.close() # закрыть диалог
 
+    '''
+    функция: 
+    Обработчик нажатия на кнопку ОК
+    '''
     def push_ok(self):
-        self.result = 2
+        self.result = DLG_CLOSE_IGNORE
         try:
-            win = int(self.win_input.text())
-            poly = int(self.poly_input.text())
+            win = int(self.win_input.text()) # числовое значение параметра окна функции сглаживания
+            poly = int(self.poly_input.text()) # числовое значение параметра полинома функции сглаживания
             if(poly<win):
                 self.win = win
                 self.poly = poly
-                self.result=1    
+                self.result = DLG_CLOSE_OK    
         except ValueError:
-            print(f"'{string_value}'FATAL ERROR: is not a valid integer.")
+            print("Критическая ошибка: параметр не целое число")
             exit(1)
         
-        self.close()
+        self.close() # закрыть диалог
 
+    '''
+    функция: 
+    Обработчик при закрытии окна диалога
+    '''
     def closeEvent(self, event: QCloseEvent):
-        if(self.result==2):
-            QMessageBox.about(self, "Внимание", "Введены некорректные параметры (poly < win)")
-            self.result=0
-            event.ignore()
+        if(self.result==DLG_CLOSE_IGNORE):
+            QMessageBox.about(self, "Внимание", "Введены некорректные параметры (полином < окно)")
+            self.result=DLG_CLOSE_CANCEL
+            event.ignore() # не закрывать окно
         else:
-            event.accept()
+            event.accept() # закрыть окно
 
-    def get_poly(self):
-        return self.poly
-    def ok(self):
-        self.poly= edit1.text.asint()
-        self.win=edit2.text.asint()    
-
+'''
+Класс:
+основное окно программы
+'''
 class MainWindow(QtWidgets.QMainWindow):
 
     def __init__(self, *args, **kwargs):
         
         super(MainWindow, self).__init__(*args, **kwargs) # вызвать конструктор базового класса QMainWindow
 
-        self.calcPlot = None
-        
-        self.centralwidget = QWidget()
-        self.GraphWidget = pg.PlotWidget()
-        self.GraphWidgetResult = pg.PlotWidget()
-        self.BFile = QPushButton('Файл')
-        self.BCalc = QPushButton('Рассчитать')
-        self.BClear = QPushButton('Очистить')
+        self.calcPlot = None # график функции сглаживания
+
+        self.setWindowTitle("Расчет сигнала") # установка названия окна программы
+
+        self.centralwidget = QWidget() # основная область окна
+        self.GraphWidget = pg.PlotWidget() # виджет отображения графика исходных данных
+        self.GraphWidget.showGrid(True, True, 0.5)
+        self.GraphWidgetResult = pg.PlotWidget() # виджет отображения графика результатов рассчета сигнала
+        self.GraphWidgetResult.showGrid(True, True, 0.5)
+
+        self.BFile = QPushButton('Файл') # кнопка открытия файла с данными сигнала
+        self.BFile.setToolTip("Открыть файл данных сигнала")
+        self.BCalc = QPushButton('Рассчитать') # кнопка рассчета параметров сигнала
+        self.BCalc.setToolTip("Рассчитать параметры сигнала")
+        self.BClear = QPushButton('Очистить') # кнопка очистки результатов расчета параметров сигнала
+        self.BClear.setToolTip("Удалить рассчеты параметров сигнала")
         self.BClear.setGeometry(0,0,300,40)
-        self.listResult = QListWidget()
+                
+        self.listResult = QListWidget() # поле списка вычисления результатов параметров сигнала
         self.listResult.setGeometry(0,0,500,200)
         self.setCentralWidget(self.centralwidget)
         
-        self.BCalc.setEnabled(False)
-        self.BClear.setEnabled(False)
+        self.BCalc.setEnabled(False) # запретить кнопку рассчета результатов
+        self.BClear.setEnabled(False) # запретить кнопку очистки результатов
 
-        self.setWindowTitle("Расчет сигнала")
+        layout_main = QtWidgets.QVBoxLayout(self.centralwidget) # основной менеджер размещения элементов окна
 
-        grid = QtWidgets.QGridLayout(self.centralwidget)
-        grid.addWidget(self.BFile, 0, 0)
-        grid.addWidget(self.BCalc, 1, 0) 
-        grid.addWidget(self.BClear,2, 0) 
+        widget_buttons = QWidget() # виджет кнопок
+        layout_buttons = QtWidgets.QHBoxLayout(widget_buttons) # менеджер размещения кнопок
+        layout_buttons.addWidget(self.BFile)
+        layout_buttons.addWidget(self.BCalc) 
+        layout_buttons.addWidget(self.BClear) 
+        layout_main.addWidget(widget_buttons)
+        '''
+        styleSheet = """
+                        QToolBox::tab {
+                            border: 1px solid #C4C4C3;
+                            border-bottom-color: RGB(0, 0, 255);                            
+                        }
+                        QToolBox::tab:selected {
+                            background-color: #f14040;
+                            border-bottom-style: none;
+                        }
+                     """
+        toolbox = QToolBox()
+        toolbox.addItem(self.BFile, "Файл")
+        toolbox.addItem(self.BCalc, "Рассчитать")
+        toolbox.addItem(self.BClear, "Очистить")
+        layout_main.addWidget(toolbox)
+        toolbox.setCurrentIndex(1)
+        toolbox.setStyleSheet(styleSheet)
+        toolbox.setItemToolTip(1, 'Открыть файл данных сигнала')
+        toolbox.setItemToolTip(2, 'Рассичать параметры сигнала')
+        toolbox.setItemToolTip(3, 'Очистить рассчеты праметров сигнала')
+        '''
+        widget_result = QWidget() # виджет элементов отображения данных
+        layout_result = QtWidgets.QVBoxLayout(widget_result)
+        layout_main.addWidget(widget_result)
         
-        wg = QWidget()
-        grid.addWidget(wg, 3, 0)
+        split_result = QSplitter(Qt.Vertical) # виджет-сплиттер управления виджетами отображения обработки сигнала
+        split_result.addWidget(self.GraphWidget)
+        split_result.addWidget(self.GraphWidgetResult)
+        split_result.addWidget(self.listResult)
+        layout_result.addWidget(split_result)
 
-        split = QSplitter(Qt.Vertical)
-        split.addWidget(self.GraphWidget)
-        split.addWidget(self.GraphWidgetResult)
-        split.addWidget(self.listResult)
-        
-        grid2 = QtWidgets.QGridLayout(wg)
-        grid2.addWidget(split)
+        self.GraphWidget.clear() # очистка графика исходного сигнала
+        self.GraphWidget.setBackground("k") # фон графика сигнала - черный
 
-        self.GraphWidget.clear()
-        self.GraphWidget.setBackground("k")
+        self.GraphWidget.addLegend() # разрешить отображение легенды на графике
+        self.GraphWidget.setLabel(axis='left', text='V, В') # параметры вертикальной оси 
+        self.GraphWidget.setLabel(axis='bottom', text='t, ns') # параметры горизонтальной оси
+        self.GraphWidget.getAxis('left').setTextPen('y') # цвет надписей вертикальной оси
+        self.GraphWidget.getAxis('bottom').setTextPen('y') # цвет надписей горизонтальной оси
 
-        self.GraphWidget.addLegend()
-        self.GraphWidget.setLabel(axis='left', text='V, В')
-        self.GraphWidget.setLabel(axis='bottom', text='t, ns')
-        self.GraphWidget.getAxis('left').setTextPen('y')
-        self.GraphWidget.getAxis('bottom').setTextPen('y')
+        self.GraphWidgetResult.addLegend() # разрешить отображение легенды на графике
+        self.GraphWidgetResult.setLabel(axis='left', text='V, В') # параметры вертикальной оси 
+        self.GraphWidgetResult.setLabel(axis='bottom', text='t, ns') # параметры горизонтальной оси
+        self.GraphWidgetResult.getAxis('left').setTextPen('y') # цвет надписей вертикальной оси
+        self.GraphWidgetResult.getAxis('bottom').setTextPen('y') # цвет надписей горизонтальной оси
 
-        self.GraphWidgetResult.addLegend()
-        self.GraphWidgetResult.setLabel(axis='left', text='V, В')
-        self.GraphWidgetResult.setLabel(axis='bottom', text='t, ns')
-        self.GraphWidgetResult.getAxis('left').setTextPen('y')
-        self.GraphWidgetResult.getAxis('bottom').setTextPen('y')
-
-        self.BFile.clicked.connect(self.get_file)
-        self.BCalc.clicked.connect(self.calc) 
-        self.BClear.clicked.connect(self.clear)
+        self.BFile.clicked.connect(self.get_file) # установка функции обработки при нажатии на кнопку ФАЙЛ
+        self.BCalc.clicked.connect(self.calc) # установка функции обработки при нажатии на кнопку Рассчитать
+        self.BClear.clicked.connect(self.clear) # установка функции обработки при нажатии на кнопку Очистить
             
         self.showMaximized()
 
+    '''
+    Функция
+    Рисует график в виджете исходных данных сигнала
+    '''
     def plot(self, x, y, desc, color): 
         p = self.GraphWidget.plot(x, y,pen=color, name=desc)
         return p
     
-    '''def hlines(self, lines, clr):
-        p = self.GraphWidget.addLine(lines, color=clr)
-        return p
+    '''
+    Функция
+    Очищает результаты вычислений кроме графика исходных данных
     '''
     def clear(self):
-        global y2
-        global y
-        global x
-
         if (self.calcPlot != None):
-            self.GraphWidget.removeItem(self.calcPlot)
-            self.GraphWidgetResult.clear()
-            self.calcPlot = None
-            self.BClear.setEnabled(False)
-            self.listResult.clear()
-        
-    def calc(self): # функция класса MainWindow, вычисляющая результаты обработки графика
-        global y2
-        global y
-        global x
+            self.GraphWidget.removeItem(self.calcPlot) # очистить график сглаженных данных в виджете исходных данных
+            self.GraphWidgetResult.clear() # очистить графики в виджете рассчета сигнала
+            self.calcPlot = None # график функции сглаженных данных не определен
+            self.BClear.setEnabled(False) # запретить кнопку Очистить
+            self.listResult.clear() # очистить результаты рассчета сигнала
 
-        if len(y)>0:
-            y2 = []
-            self.listResult.clear()
+    '''
+    Функция
+    Рассчет длительности и периода по уровню 0.5 сигнала
+    ''' 
+    def calcDlitelnostAndPeriodAndFreq(self, poitns):
+        tmp = len(poitns)
+        sig_id = 0 # счетчик номеров сигналов
+        for i in range(tmp):
+            self.GraphWidgetResult.addLine(x=poitns[i].x, y=None, pen={'color':'m', 'width':1}) # рисуем вертикальную линию в точке пересечения по уровню 0.5 сигнала
+            if i==0:
+                if ((i+1)<tmp):
+                    self.listResult.addItem("Длительность сигнала["+str(sig_id)+"]: "+"{:.2f}".format(poitns[i+1].x - poitns[i].x)+" нс")  # подсчет длистельности сигнала и вывод в поле результатов
 
-            if self.calcPlot != None:
+            else:
+                if (i % 2)==0:
+                    self.listResult.addItem("Период сигнала["+str(sig_id)+"]: "+"{:.2f}".format(poitns[i].x - poitns[i-2].x)+" нс")  # подсчет длистельности сигнала и вывод в поле результатов
+                    self.listResult.addItem("Частота сигнала["+str(sig_id)+"]: "+"{:.2f}".format(1000000000 / (poitns[i].x - poitns[i-2].x))+" Гц")  # подсчет длистельности сигнала и вывод в поле результатов
+                    sig_id = sig_id + 1
+                    if ((i+1)<tmp):
+                        self.listResult.addItem("Длительность сигнала["+str(sig_id)+"]: "+"{:.2f}".format(poitns[i+1].x - poitns[i].x)+" нс")  # подсчет длистельности сигнала и вывод в поле результатов
+
+    def calcFronts(self, front_min, front_max):
+        len_min = len(front_min)
+        len_max = len(front_max)
+        sig_id = 0 # счетчик номеров сигналов
+
+        '''
+        for i in range(tmp):
+            self.GraphWidgetResult.addLine(x=poitns[i].x, y=None, pen={'color':'m', 'width':1}) # рисуем вертикальную линию в точке пересечения по уровню 0.5 сигнала
+            if i==0:
+                if ((i+1)<tmp):
+                    self.listResult.addItem("Длительность сигнала["+str(sig_id)+"]: "+"{:.2f}".format(poitns[i+1].x - poitns[i].x)+" нс")  # подсчет длистельности сигнала и вывод в поле результатов
+
+            else:
+                if (i % 2)==0:
+                    self.listResult.addItem("Период сигнала["+str(sig_id)+"]: "+"{:.2f}".format(poitns[i].x - poitns[i-2].x)+" нс")  # подсчет длистельности сигнала и вывод в поле результатов
+                    self.listResult.addItem("Частота сигнала["+str(sig_id)+"]: "+"{:.2f}".format(1000000000 / (poitns[i].x - poitns[i-2].x))+" Гц")  # подсчет длистельности сигнала и вывод в поле результатов
+                    sig_id = sig_id + 1
+                    if ((i+1)<tmp):
+                        self.listResult.addItem("Длительность сигнала["+str(sig_id)+"]: "+"{:.2f}".format(poitns[i+1].x - poitns[i].x)+" нс")  # подсчет длистельности сигнала и вывод в поле результатов
+        '''
+
+    '''
+    Функция
+    Рассчитывает параметры сигнала
+    '''  
+    def calc(self):
+        global savgol_y
+        global signal_y
+        global signal_x
+
+        if len(signal_y)>0: # проверка наличия входных данных
+            savgol_y = []            
+
+            if self.calcPlot != None: # удалить результаты предыдущего расчета
                 self.GraphWidget.removeItem(self.calcPlot)
                 self.GraphWidgetResult.clear()
                 self.calcPlot = None
                 self.BClear.setEnabled(False)
+                self.listResult.clear() # очистить результаты вычислений
 
 
-            dlg = CustomDialog()
-            dlg.exec_()
+            dlg = SavGol_Dialog()
+            dlg.exec_() #  открыть диалог параметров расчета
 
-            if (dlg.get_result() == 1):
-                win = dlg.get_win()
-                poly = dlg.get_poly()
+            if (dlg.get_result() == DLG_CLOSE_OK): # параметры были заданы
+                win = dlg.get_win() # получить параметр окна
+                poly = dlg.get_poly() # получить параметр полинома
                     
-                y2 = savgol_filter(y, win, poly) 
-                legend_str = "Сглаженный сигнал: win= " + str(win) + " poly= " + str(poly)
-                self.calcPlot = self.plot(x, y2, legend_str,'w') 
+                savgol_y = savgol_filter(signal_y, win, poly) # сформировать данные массива функции сглаживания
+                
+#///////////////////////////////////////
+                # Считаем максимальное значение сигнала
+                level = np.amax(savgol_y)
 
-                zz, _= signal_s.find_peaks(y)
+                # Находим пики выше уровня 0.5 от максимального
+                peaks, _ = find_peaks(savgol_y, height=0.5 * level)
+                if peaks.size < 1:
+                    print("ОШИБКА: некорректный сигнгал")
+                    return
+                sig_peaks = savgol_y[peaks[0]:peaks[-1]] # формируем массив пиковых значений сигнала
+                
+                mean_v = np.mean(sig_peaks) # Находим среднее значение пиков импульса                   
+                sig_peaks = [sig for sig in sig_peaks if ( sig > 0.1*mean_v)] # удалить пиковые элементы меньше уровя 0.1 от среднего () 
+                
+                # Считаем результирующее среднее значение амплитуды сигнала
+                magnitude =float(np.mean(sig_peaks))
+                time.sleep(0.5)
+                #print("MAGNITUDE: ", magnitude)
 
+#////////////////////////////////////////
+
+                data_magnitude = [] # амплитуда
+                data_sigtime = [] # 0.5 уровня сигнала                
+                data_front_max = [] # уровеню 0.9 амплитуды
+                data_front_min = [] # уровеню 0.1 амплитуды
+                for t in range(len(savgol_y)):
+                    data_sigtime.append(magnitude / 2) # массив  для рассчета длительности и периода сигнала по уровню 0.5
+                    data_magnitude.append(magnitude) # массив для рассчета амплитуды сигнала
+                    data_front_max.append(magnitude*0.9) # массив для рассчета длительности фронта по уровню 0.9 амплитуда
+                    data_front_min.append(magnitude*0.1) # массив для рассчета длительности фронта по уровню 0.1 амплитуда
+                
+                # отображение графиков расчетных линий сигнала
+                legend_str = "Сглаженный сигнал: Par_win= " + str(win) + " Par_poly= " + str(poly)
+                self.calcPlot = self.plot(signal_x, savgol_y, legend_str,'w') # отобразить функцию сглаживания
+                
                 self.GraphWidgetResult.clear()
-                self.GraphWidgetResult.plot(x[zz], y[zz], pen='r', name="Пиковый сигнал")
-                y4 = [] # амплитуда
-                sko = np.std(y[zz]) 
-                y3 = [] # среднее
-                for t in range(len(y[zz])):
-                    y3.append(sko)
-                    y4.append(sko*2)
-                self.GraphWidgetResult.plot(x[zz], y3, pen='y', name="Среднее")
-                
-                
-                self.GraphWidgetResult.plot(x[zz], y4, pen='g', name="Амплитуда")
+                self.GraphWidgetResult.plot(signal_x, savgol_y, pen='r', name=legend_str) # отобразить функцию сглаживания для расчетов
+                self.GraphWidgetResult.plot(signal_x, data_sigtime, pen='y', name="Сигнал, 0.5 уровня")
+                self.GraphWidgetResult.plot(signal_x, data_magnitude, pen='g', name="Амплитуда сигнала")
+                self.GraphWidgetResult.plot(signal_x, data_front_max, pen='b', name="Уровень 0.9")
+                self.GraphWidgetResult.plot(signal_x, data_front_min, pen='c', name="Уровень 0.1")
 
+                self.listResult.addItem("Амплитуда: "+"{:.2f}".format(magnitude)+" В")  # вывод значения амплитуды сигнала  
                 
-                t1  = np.max(y4)
-                self.listResult.addItem("Амплитуда: "+"{:.2f}".format(t1)+" В")    
-                
-                first_line = LineString(np.column_stack((x[zz], y[zz])))
-                second_line = LineString(np.column_stack((x[zz], y3)))
-                intersection = first_line.intersection(second_line) #координаты точек пересечения красного и среднего
-                #print(intersection)
-                points = [p for p in intersection.geoms]
-                #print(points)
-                
-                ps = [item[1] for item in sorted([(pt.x,pt) for pt in points])] # сортировка по X
-                #print(ps)
+                # расчет длительности и периода сигнала по точкам пересечения линии 0.5 уровня сигнала и графика сигнала
+                savgol_y_line = LineString(np.column_stack((signal_x, savgol_y))) # график сигнала
+                sigtime_line = LineString(np.column_stack((signal_x, data_sigtime))) # график уровня 0.5
+                p_intersection = savgol_y_line.intersection(sigtime_line) # формирование объекта точек пересечения 
+                points_inters = [p for p in p_intersection.geoms] # преобразование объекта точек пересечения в массив объектов точек пересечения
+                poitns_inters_sort = [item[1] for item in sorted([(pt.x,pt) for pt in points_inters])] # сортировка массива объектов точек пересечения по X по уровню 0.5 сигнала
+                self.calcDlitelnostAndPeriodAndFreq(poitns_inters_sort)
 
-                self.listResult.addItem("T: "+"{:.2f}".format(ps[1].x - ps[0].x)+" ns") 
+                # расчет длительности фронтов сигнала
+                data_front_max_line = LineString(np.column_stack((signal_x, data_front_max))) # график уровня 0.9
+                p_intersection = savgol_y_line.intersection(data_front_max_line) # формирование объекта точек пересечения 
+                front_inters_max = [p for p in p_intersection.geoms] # преобразование объекта точек пересечения в массив объектов точек пересечения
+                front_inters_max_sort = [item[1] for item in sorted([(pt.x,pt) for pt in points_inters])] # сортировка массива объектов точек пересечения
+                
+                data_front_min_line = LineString(np.column_stack((signal_x, data_front_min))) # график уровня 0.9
+                p_intersection = savgol_y_line.intersection(data_front_min_line) # формирование объекта точек пересечения 
+                front_inters_min = [p for p in p_intersection.geoms] # преобразование объекта точек пересечения в массив объектов точек пересечения
+                front_inters_min_sort = [item[1] for item in sorted([(pt.x,pt) for pt in points_inters])] # сортировка массива объектов точек пересечения
+              
+                self.calcFronts(front_inters_min_sort, front_inters_max_sort) # расчет длительности фронтов
                 
                 self.BCalc.setEnabled(True)
                 self.BClear.setEnabled(True)
 
+    '''
+    Функция
+    Открывает файл исходных данных сигнала и отображает его в виджете исходного сигнала
+    '''
     def get_file(self):
 
-        global x
-        global y
+        global signal_x
+        global signal_y
 
         try:
 
             file_name, _ = QFileDialog.getOpenFileName(self, 'Signal Data', r"", "") # открыть диалог выбора файла, по закрытию диалога в переменную file_name возвратится полное имя файла
             if os.path.exists(file_name):              
-                file = open(file_name,'r') 
-            
-                content_y = file.read().replace('[','').replace(']','').replace(' ','').split(",") 
-                a = content_y
-                y = np.asarray(a, dtype=float) 
+                file = open(file_name,'r', encoding="UTF-8")             
+                # чтение файла в буфер и преобразование текстовых данных
+                file_data = file.read().replace('[','').replace(']','').replace(' ','').split(",") 
+                signal_y = np.asarray(file_data, dtype=float) # формирование массива numpy для входных данных сигнала из файла
         except OSError:
             print("Ошибка OSError")
         except TypeError:
@@ -259,34 +407,34 @@ class MainWindow(QtWidgets.QMainWindow):
         except ValueError:
             print("Недопустимое значение. Невозможно считать данные из файла!")
         except IndexError:
-            print("Огшибка IndexError")
-        except ZeroDivisionError:
-            print("Деление на ноль")
+            print("Ошибка IndexError")
         except FileNotFoundError:
             print("Файл не найден.")
         else:
 
-            tmp = 0 
-            x = [] 
-            
-            for t in range(len(y)): 
-                x.append(tmp) 
-                tmp = tmp + 50 
-            x = np.array(x)
-            self.listResult.clear()  
-            self.GraphWidget.clear() 
-            self.GraphWidgetResult.clear()
-            self.plot(x, y, file_name,'g') 
-            self.calcPlot = None
+            # формирования массива временных отсчетов входного сигнала
+            time_value = 0 # рассчетное значение временных отсчетов входного сигнала (+50 нс)
+            signal_x = [] 
+            for t in range(len(signal_y)): 
+                signal_x.append(time_value) 
+                time_value = time_value + 50 
+            signal_x = np.array(signal_x) # преобразования массива в массива numpy
+
+            self.listResult.clear()  # очистка результатов расчета
+            self.GraphWidget.clear()  # очистка всех графиков исходных данных
+            self.GraphWidgetResult.clear()  # очистка всех графиков результатов
+            self.plot(signal_x, signal_y, file_name,'g') # отображение графика входного сигнала
+            self.calcPlot = None # график функции сглаживания не определен
        
-            self.BCalc.setEnabled(True)
-            self.BClear.setEnabled(False)
-
+            self.BCalc.setEnabled(True) # разрешение кнопки Рассчитать
+            self.BClear.setEnabled(False) # запрет кнопки Очистить
          
-
+'''
+Функция:
+Запуск программы
+'''
 if __name__ == '__main__': 
-    app = QtWidgets.QApplication(sys.argv) 
-    main = MainWindow() 
-    main.show() 
-    sys.exit(app.exec_()) 
-
+    app = QtWidgets.QApplication(sys.argv) # создать объект программы
+    main = MainWindow() # создать объект окна программы
+    main.show() # показать окно программы
+    sys.exit(app.exec_())  # запустить программу и выдать код завершения по закрытию
