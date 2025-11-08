@@ -7,14 +7,18 @@ from PyQt5 import QtWidgets, uic
 import pyqtgraph as pg
 import numpy as np
 
-from PyQt5.QtCore    import * 
+from PyQt5.QtCore    import  * 
 from PyQt5.QtGui     import * 
-from PyQt5.QtWidgets import QFileDialog, QApplication, QMainWindow, QWidget, QPushButton, QListWidget, QSplitter, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QToolBox
+from PyQt5.QtWidgets import QDialog, QFileDialog, QApplication, QMainWindow, QWidget, QPushButton, QListWidget, QSplitter, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QToolBox, QAction, QToolBar,  QToolButton
 
 from scipy.signal import savgol_filter, find_peaks
 import scipy.signal as signal_s
 
 from shapely.geometry import LineString
+
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+import PyQt5.QtWebEngineWidgets as QtWebEngineWidgets
+from PyQt5.QtCore import QUrl
 
 # глобальные переменные
 signal_y = [] # массив данных сигнала из файла
@@ -24,6 +28,21 @@ savgol_y = [] # массив данных сглаженного сигнала
 DLG_CLOSE_CANCEL = 0 # Диалог закрыт не по кнопке Отмена
 DLG_CLOSE_OK = 1 # Диалог закрыт не по кнопке OK
 DLG_CLOSE_IGNORE = 2 # Признак отмены закрытия окна
+
+
+#class WebPDFViewer(QDialog):
+class WebPDFViewer(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.web_view = QWebEngineView(self)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.web_view)
+        self.setLayout(layout)
+        self.web_view.settings().setAttribute(QtWebEngineWidgets.QWebEngineSettings.PluginsEnabled, True)
+
+    def load_pdf(self, path):
+       self.web_view.load(path)
 
 '''
 Класс:
@@ -142,57 +161,94 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setWindowTitle("Расчет сигнала") # установка названия окна программы
 
+#////////////////////////////////////
+        mainMenu = self.menuBar()
+        
+        fileMenu = mainMenu.addMenu('Сигнал')
+        self.action_File = QAction("Файл", self)
+        self.action_File.triggered.connect(self.get_file)
+        self.action_File.setShortcut("Ctrl+F")
+        self.action_File.setToolTip("Открыть файл с данными сигнала Ctrl+F")
+        fileMenu.addAction(self.action_File)
+        fileMenu.addSeparator()
+        self.action_Close = QAction("Закрыть", self)
+        self.action_Close.triggered.connect(self.close)
+        self.action_Close.setShortcut("Ctrl+Q")
+        fileMenu.addAction(self.action_Close)
+        
+        helpMenu = mainMenu.addMenu('Справка')
+        
+        self.action_Info = QAction("Параметры сигнала", self)
+        self.action_Info.triggered.connect(self.showInfo)
+        self.action_Info.setShortcut("Ctrl+H")
+        
+        self.action_Ruk = QAction("Руководство", self)
+        self.action_Ruk.triggered.connect(self.showRuk)
+        self.action_Ruk.setShortcut("Ctrl+R")
+        
+        self.action_About = QAction("О программе", self)
+        self.action_About.triggered.connect(self.showAbout)
+        self.action_About.setShortcut("F1")
+        
+        helpMenu.addAction(self.action_Ruk)       
+        helpMenu.addAction(self.action_Info)   
+        helpMenu.addSeparator()
+        helpMenu.addAction(self.action_About)   
+       
+#/////////////////
+        ctlToolBar = QToolBar("Управление", self)
+        ctlToolBar.setMovable(False)
+        self.addToolBar(Qt.TopToolBarArea, ctlToolBar)
+        
+        self.action_Calc = QAction("Рассчитать", self)
+        self.action_Calc.triggered.connect(self.calc)
+        self.action_Calc.setShortcut("Ctrl+S")
+        self.action_Calc.setToolTip("Рассчитать параметры сигнала Ctrl+S")
+        ctlToolBar.addAction(self.action_Calc)
+
+        self.action_Clear = QAction("Очистить", self)
+        self.action_Clear.triggered.connect(self.clear)
+        self.action_Clear.setShortcut("Ctrl+C")
+        self.action_Clear.setToolTip("Удалить рассчеты параметров сигнала Ctrl+C")
+        ctlToolBar.addAction(self.action_Clear)
+
+        
+
+
+#/////////////////
+
         self.centralwidget = QWidget() # основная область окна
         self.GraphWidget = pg.PlotWidget() # виджет отображения графика исходных данных
         self.GraphWidget.showGrid(True, True, 0.5)
         self.GraphWidgetResult = pg.PlotWidget() # виджет отображения графика результатов рассчета сигнала
         self.GraphWidgetResult.showGrid(True, True, 0.5)
 
-        self.BFile = QPushButton('Файл') # кнопка открытия файла с данными сигнала
-        self.BFile.setToolTip("Открыть файл данных сигнала")
-        self.BCalc = QPushButton('Рассчитать') # кнопка рассчета параметров сигнала
-        self.BCalc.setToolTip("Рассчитать параметры сигнала")
-        self.BClear = QPushButton('Очистить') # кнопка очистки результатов расчета параметров сигнала
-        self.BClear.setToolTip("Удалить рассчеты параметров сигнала")
-        self.BClear.setGeometry(0,0,300,40)
+        self.BFile = QToolButton()
+        self.BFile.setDefaultAction(self.action_File)
+        
+        self.BCalc = QToolButton()
+        self.BCalc.setDefaultAction(self.action_Calc)
+        
+        self.BClear = QToolButton()
+        self.BClear.setDefaultAction(self.action_Clear)
                 
         self.listResult = QListWidget() # поле списка вычисления результатов параметров сигнала
         self.listResult.setGeometry(0,0,500,200)
         self.setCentralWidget(self.centralwidget)
         
-        self.BCalc.setEnabled(False) # запретить кнопку рассчета результатов
-        self.BClear.setEnabled(False) # запретить кнопку очистки результатов
-
-        layout_main = QtWidgets.QVBoxLayout(self.centralwidget) # основной менеджер размещения элементов окна
-
+        self.action_Calc.setEnabled(False) # запретить рассчет результатов
+        self.action_Clear.setEnabled(False) # запретить очистку результатов
+        
         widget_buttons = QWidget() # виджет кнопок
         layout_buttons = QtWidgets.QHBoxLayout(widget_buttons) # менеджер размещения кнопок
+        layout_buttons.setAlignment(Qt.AlignLeft)
         layout_buttons.addWidget(self.BFile)
         layout_buttons.addWidget(self.BCalc) 
         layout_buttons.addWidget(self.BClear) 
+        
+        layout_main = QtWidgets.QVBoxLayout(self.centralwidget) # основной менеджер размещения элементов окна
         layout_main.addWidget(widget_buttons)
-        '''
-        styleSheet = """
-                        QToolBox::tab {
-                            border: 1px solid #C4C4C3;
-                            border-bottom-color: RGB(0, 0, 255);                            
-                        }
-                        QToolBox::tab:selected {
-                            background-color: #f14040;
-                            border-bottom-style: none;
-                        }
-                     """
-        toolbox = QToolBox()
-        toolbox.addItem(self.BFile, "Файл")
-        toolbox.addItem(self.BCalc, "Рассчитать")
-        toolbox.addItem(self.BClear, "Очистить")
-        layout_main.addWidget(toolbox)
-        toolbox.setCurrentIndex(1)
-        toolbox.setStyleSheet(styleSheet)
-        toolbox.setItemToolTip(1, 'Открыть файл данных сигнала')
-        toolbox.setItemToolTip(2, 'Рассичать параметры сигнала')
-        toolbox.setItemToolTip(3, 'Очистить рассчеты праметров сигнала')
-        '''
+
         widget_result = QWidget() # виджет элементов отображения данных
         layout_result = QtWidgets.QVBoxLayout(widget_result)
         layout_main.addWidget(widget_result)
@@ -218,11 +274,45 @@ class MainWindow(QtWidgets.QMainWindow):
         self.GraphWidgetResult.getAxis('left').setTextPen('y') # цвет надписей вертикальной оси
         self.GraphWidgetResult.getAxis('bottom').setTextPen('y') # цвет надписей горизонтальной оси
 
-        self.BFile.clicked.connect(self.get_file) # установка функции обработки при нажатии на кнопку ФАЙЛ
-        self.BCalc.clicked.connect(self.calc) # установка функции обработки при нажатии на кнопку Рассчитать
-        self.BClear.clicked.connect(self.clear) # установка функции обработки при нажатии на кнопку Очистить
-            
+        self.info_signal = WebPDFViewer()
+        self.info_signal.setWindowTitle("Структура сигнала")
+        self.info_signal.setGeometry(100, 100, 800, 600)
+
+        self.info_ruk = WebPDFViewer()
+        self.info_ruk.setWindowTitle("Руководство")
+        self.info_ruk.setGeometry(100, 100, 800, 600)
+
+        self.statusbar = self.statusBar()
+        self.text_status = "Не заданы входные данные"
+        self.statLabel = QLabel(f"{self.text_status}")
+        self.statusbar.addPermanentWidget(self.statLabel, 1)
+
         self.showMaximized()
+
+    '''
+    Функция
+    открывает окно О программе
+    '''
+    def showAbout(self):
+        QMessageBox.information(self, 'О программе', 'Программа расчета параметров сигнала v 0.1/2025')
+
+    '''
+    Функция
+    открывает окно с информацией о параметрах сигнала
+    '''
+    def showInfo(self):
+        self.info_signal.load_pdf(QUrl("file:///sig_info.pdf"))
+        #self.info_signal.exec_() #QDialog
+        self.info_signal.show()
+
+    '''
+    Функция
+    открывает окно с информацией о структуре программы
+    '''
+    def showRuk(self):
+        self.info_ruk.load_pdf(QUrl("file:///ruk.pdf"))
+        #self.info_signal.exec_() #QDialog
+        self.info_ruk.show()    
 
     '''
     Функция
@@ -241,7 +331,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.GraphWidget.removeItem(self.calcPlot) # очистить график сглаженных данных в виджете исходных данных
             self.GraphWidgetResult.clear() # очистить графики в виджете рассчета сигнала
             self.calcPlot = None # график функции сглаженных данных не определен
-            self.BClear.setEnabled(False) # запретить кнопку Очистить
+            self.action_Clear.setEnabled(False) # запретить Очистить
             self.listResult.clear() # очистить результаты рассчета сигнала
 
     '''
@@ -302,7 +392,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.GraphWidget.removeItem(self.calcPlot)
                 self.GraphWidgetResult.clear()
                 self.calcPlot = None
-                self.BClear.setEnabled(False)
+                self.action_Clear.setEnabled(False)
                 self.listResult.clear() # очистить результаты вычислений
 
 
@@ -380,8 +470,11 @@ class MainWindow(QtWidgets.QMainWindow):
               
                 self.calcFronts(front_inters_min_sort, front_inters_max_sort) # расчет длительности фронтов
                 
-                self.BCalc.setEnabled(True)
-                self.BClear.setEnabled(True)
+                self.action_Calc.setEnabled(True)
+                self.action_Clear.setEnabled(True)
+                
+                self.text_status = "Расчет выполнен"
+                self.statLabel.setText(self.text_status)
 
     '''
     Функция
@@ -392,14 +485,16 @@ class MainWindow(QtWidgets.QMainWindow):
         global signal_x
         global signal_y
 
+        is_open = False
         try:
 
-            file_name, _ = QFileDialog.getOpenFileName(self, 'Signal Data', r"", "") # открыть диалог выбора файла, по закрытию диалога в переменную file_name возвратится полное имя файла
+            file_name, _ = QFileDialog.getOpenFileName(self, 'Выбор данных сигнала', r"", "") # открыть диалог выбора файла, по закрытию диалога в переменную file_name возвратится полное имя файла
             if os.path.exists(file_name):              
                 file = open(file_name,'r', encoding="UTF-8")             
                 # чтение файла в буфер и преобразование текстовых данных
                 file_data = file.read().replace('[','').replace(']','').replace(' ','').split(",") 
                 signal_y = np.asarray(file_data, dtype=float) # формирование массива numpy для входных данных сигнала из файла
+                is_open = True
         except OSError:
             print("Ошибка OSError")
         except TypeError:
@@ -411,23 +506,28 @@ class MainWindow(QtWidgets.QMainWindow):
         except FileNotFoundError:
             print("Файл не найден.")
         else:
+            if is_open == True:
+                # формирования массива временных отсчетов входного сигнала
+                if len(signal_y) > 0:
+                    time_value = 0 # рассчетное значение временных отсчетов входного сигнала (+50 нс)
+                    signal_x = [] 
+                    for t in range(len(signal_y)): 
+                        signal_x.append(time_value) 
+                        time_value = time_value + 50 
+                    signal_x = np.array(signal_x) # преобразования массива в массива numpy
 
-            # формирования массива временных отсчетов входного сигнала
-            time_value = 0 # рассчетное значение временных отсчетов входного сигнала (+50 нс)
-            signal_x = [] 
-            for t in range(len(signal_y)): 
-                signal_x.append(time_value) 
-                time_value = time_value + 50 
-            signal_x = np.array(signal_x) # преобразования массива в массива numpy
-
-            self.listResult.clear()  # очистка результатов расчета
-            self.GraphWidget.clear()  # очистка всех графиков исходных данных
-            self.GraphWidgetResult.clear()  # очистка всех графиков результатов
-            self.plot(signal_x, signal_y, file_name,'g') # отображение графика входного сигнала
-            self.calcPlot = None # график функции сглаживания не определен
-       
-            self.BCalc.setEnabled(True) # разрешение кнопки Рассчитать
-            self.BClear.setEnabled(False) # запрет кнопки Очистить
+                    self.listResult.clear()  # очистка результатов расчета
+                    self.GraphWidget.clear()  # очистка всех графиков исходных данных
+                    self.GraphWidgetResult.clear()  # очистка всех графиков результатов
+                    self.plot(signal_x, signal_y, file_name,'g') # отображение графика входного сигнала
+                    self.calcPlot = None # график функции сглаживания не определен
+            
+                    self.action_Calc.setEnabled(True) # разрешение Рассчитать
+                    self.action_Clear.setEnabled(False) # запрет Очистить
+                    
+                    self.text_status = "Данные загружены"
+                    self.statLabel.setText(self.text_status)
+                
          
 '''
 Функция:
@@ -438,3 +538,4 @@ if __name__ == '__main__':
     main = MainWindow() # создать объект окна программы
     main.show() # показать окно программы
     sys.exit(app.exec_())  # запустить программу и выдать код завершения по закрытию
+
